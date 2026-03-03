@@ -91,58 +91,41 @@ Deno.serve(async (req: Request) => {
     const questionEmbedding = embeddingData.data[0].embedding;
 
     // Step 2: Find similar laws using vector similarity search
-    console.log("Searching for similar laws...");
+    console.log("Searching for similar laws using vector search...");
 
-    // Query law_embeddings with vector similarity
-    const { data: embeddings, error: embError } = await supabase
-      .from("law_embeddings")
-      .select(`
-        id,
-        law_id,
-        text_chunk,
-        chunk_index,
-        laws!inner(
-          id,
-          name_ar,
-          name_en,
-          law_number,
-          url,
-          publication_date,
-          full_text_ar
-        )
-      `)
-      .not("embedding", "is", null)
-      .limit(100);
+    const { data: similarLaws, error: searchError } = await supabase.rpc(
+      "search_similar_laws",
+      {
+        query_embedding: questionEmbedding,
+        match_threshold: 0.3,
+        match_count: max_results,
+      }
+    );
 
-    if (embError) {
-      console.error("Error fetching embeddings:", embError);
-      throw embError;
+    if (searchError) {
+      console.error("Vector search error:", searchError);
+      throw searchError;
     }
 
-    console.log(`Found ${embeddings?.length || 0} law embeddings`);
+    console.log(`Found ${similarLaws?.length || 0} similar laws`);
 
-    // Calculate similarity scores manually
-    const results = embeddings
-      ?.map((emb: any) => {
-        // For now, return all with decent similarity
-        // In production, calculate actual cosine similarity
-        return {
-          article_id: emb.id,
-          law_id: emb.law_id,
-          law_name_ar: emb.laws.name_ar,
-          law_name_en: emb.laws.name_en || "",
-          law_number: emb.laws.law_number,
-          law_url: emb.laws.url,
-          publication_date: emb.laws.publication_date || "",
-          article_number: "1",
-          article_title_ar: "",
-          article_text_ar: emb.laws.full_text_ar || emb.text_chunk,
-          similarity: 0.75,
-        };
-      })
-      .slice(0, max_results) || [];
+    // Format results for the AI
+    const results = similarLaws?.map((law: any) => ({
+      article_id: law.law_id,
+      law_id: law.law_id,
+      law_name_ar: law.law_name_ar,
+      law_name_en: "",
+      law_number: law.law_number,
+      law_url: law.law_url,
+      publication_date: "",
+      article_number: "1",
+      article_title_ar: "",
+      article_text_ar: law.full_text_ar,
+      similarity: law.similarity,
+    })) || [];
 
-    console.log(`Returning ${results.length} results`);
+    console.log(`Returning ${results.length} results with similarities:`,
+      results.map(r => r.similarity));
 
     // Step 3: Generate AI response with context
     return await generateResponse(
