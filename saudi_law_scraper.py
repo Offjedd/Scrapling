@@ -9,8 +9,12 @@ import re
 import json
 from datetime import datetime
 from typing import List, Dict, Optional
+from dotenv import load_dotenv
 from scrapling import StealthyFetcher
 from supabase import create_client, Client
+
+# Load environment variables
+load_dotenv()
 
 
 class SaudiLawScraper:
