@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/tmp/cc-agent/64271028/project/enhanced_scraper.py", line 16, in <module>
+    from scrapling import StealthyFetcher
+  File "/tmp/cc-agent/64271028/project/scrapling/__init__.py", line 30, in __getattr__
+    module = __import__(module_path, fromlist=[class_name])
+  File "/tmp/cc-agent/64271028/project/scrapling/fetchers/__init__.py", line 40, in __getattr__
+    module = __import__(module_path, fromlist=[class_name])
+  File "/tmp/cc-agent/64271028/project/scrapling/fetchers/stealth_chrome.py", line 2, in <module>
+    from scrapling.engines._browsers._types import StealthSession
+  File "/tmp/cc-agent/64271028/project/scrapling/engines/_browsers/_types.py", line 3, in <module>
+    from curl_cffi.requests import (
+    ...<3 lines>...
+    )
+ModuleNotFoundError: No module named 'curl_cffi'
