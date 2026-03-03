@@ -1,97 +1,85 @@
-"""
-Generate embeddings for laws using direct SQL (bypasses RLS)
-"""
-
+#!/usr/bin/env python3
+"""Generate embeddings for all laws without them"""
 import os
-import requests
-from dotenv import load_dotenv
+from openai import OpenAI
+from supabase import create_client
+import time
 
-load_dotenv()
+# Load env
+env = {}
+with open('.env') as f:
+    for line in f:
+        if '=' in line and not line.startswith('#'):
+            key, val = line.strip().split('=', 1)
+            env[key] = val
 
+# Initialize clients
+supabase = create_client(env['SUPABASE_URL'], env['SUPABASE_SERVICE_ROLE_KEY'])
+openai_client = OpenAI(api_key=env['OPENAI_API_KEY'])
 
-def generate_embeddings():
-    """Generate embeddings for all laws"""
+print("=" * 80)
+print("🧠 Generating Embeddings for All Laws")
+print("=" * 80)
 
-    openai_key = os.environ.get('OPENAI_API_KEY')
+# Get all laws
+laws_response = supabase.table('laws').select('*').execute()
+laws = laws_response.data
 
-    if not openai_key:
-        print("❌ Missing OPENAI_API_KEY")
-        return
+print(f"\n📊 Found {len(laws)} laws in database")
 
-    print("=" * 80)
-    print("Generating Embeddings for Saudi Laws")
-    print("=" * 80)
+# Get laws that already have embeddings
+embeddings_response = supabase.table('law_embeddings').select('law_id').execute()
+laws_with_embeddings = {emb['law_id'] for emb in embeddings_response.data}
 
-    # Sample laws data (we know these are already in the DB)
-    laws = [
-        {
-            'id': '04156ed9-d15d-414d-b1b4-62e7a88adc31',
-            'text': 'النظام الأساسي للحكم. المادة الأولى: المملكة العربية السعودية، دولة عربية إسلامية، ذات سيادة تامة؛ دينها الإسلام',
-        },
-        {
-            'id': '961ad019-c689-495f-aa88-dfc9bae982e4',
-            'text': 'نظام مكافحة جرائم الإرهاب وتمويله. المادة الأولى: تُقصد بالعبارات والألفاظ الآتية المعاني المُبينة. المادة الثانية: يُعاقب كل من يرتكب جريمة إرهابية',
-        },
-        {
-            'id': '95a161ce-c963-400e-ad2a-25e178af2feb',
-            'text': 'نظام العمل. المادة الأولى: يقصد بالألفاظ والعبارات الآتية المعاني الموضحة. المادة الثانية: يجب أن تكون ساعات العمل ثماني ساعات. المادة الثالثة: للعامل الحق في إجازة سنوية',
-        },
-    ]
+print(f"✅ {len(laws_with_embeddings)} laws already have embeddings")
 
-    embeddings_sql = []
+# Process laws without embeddings
+added_count = 0
 
-    for i, law in enumerate(laws, 1):
-        print(f"\n[{i}/{len(laws)}] Generating embedding for law {law['id'][:8]}...")
+for law in laws:
+    law_id = law['id']
+    
+    if law_id in laws_with_embeddings:
+        print(f"\n⏭️  {law['name_ar']} - Already has embedding")
+        continue
+    
+    print(f"\n📜 {law['name_ar']}")
+    
+    try:
+        # Generate embedding
+        text_for_embedding = f"{law['name_ar']}\n\n{law.get('full_text_ar', '')}"
+        
+        response = openai_client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text_for_embedding[:8000]
+        )
+        embedding = response.data[0].embedding
+        
+        # Insert embedding
+        supabase.table('law_embeddings').insert({
+            'law_id': law_id,
+            'text_chunk': law['name_ar'],
+            'embedding': embedding,
+            'chunk_index': 0
+        }).execute()
+        
+        print(f"   ✅ Embedding added!")
+        added_count += 1
+        
+        time.sleep(0.5)  # Rate limiting
+        
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
 
-        try:
-            # Call OpenAI embeddings API
-            response = requests.post(
-                "https://api.openai.com/v1/embeddings",
-                headers={
-                    "Authorization": f"Bearer {openai_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "text-embedding-3-small",
-                    "input": law['text'],
-                },
-                timeout=30
-            )
+print("\n" + "=" * 80)
+print(f"✅ Complete! Added {added_count} new embeddings")
+print("=" * 80)
 
-            if response.status_code == 200:
-                embedding_data = response.json()
-                embedding = embedding_data['data'][0]['embedding']
+# Final count
+final_embeddings = supabase.table('law_embeddings').select('id').execute()
+final_laws = supabase.table('laws').select('id').execute()
 
-                # Format embedding as PostgreSQL array
-                embedding_str = '[' + ','.join(map(str, embedding)) + ']'
-
-                embeddings_sql.append(
-                    f"INSERT INTO law_embeddings (law_id, text_chunk, embedding, chunk_index) "
-                    f"VALUES ('{law['id']}', '{law['text'][:500]}', '{embedding_str}'::vector, 0);"
-                )
-
-                print(f"  ✅ Generated embedding (dimension: {len(embedding)})")
-            else:
-                print(f"  ❌ Error: {response.status_code} - {response.text}")
-
-        except Exception as e:
-            print(f"  ❌ Error: {e}")
-
-    # Save SQL file
-    if embeddings_sql:
-        sql_content = '\n'.join(embeddings_sql)
-        with open('insert_embeddings.sql', 'w') as f:
-            f.write(sql_content)
-
-        print("\n" + "=" * 80)
-        print("✅ SQL file generated: insert_embeddings.sql")
-        print("=" * 80)
-        print("\nYou can now insert embeddings using:")
-        print("  1. Supabase SQL tool")
-        print("  2. Or run: psql < insert_embeddings.sql")
-        print("\nSQL preview:")
-        print(embeddings_sql[0][:200] + "...")
-
-
-if __name__ == "__main__":
-    generate_embeddings()
+print(f"\n📊 Final Status:")
+print(f"   Total Laws: {len(final_laws.data)}")
+print(f"   Laws with Embeddings: {len(final_embeddings.data)}")
+print(f"\n🎉 Your AI is ready to answer questions!")

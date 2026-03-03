@@ -1,78 +1,51 @@
 #!/usr/bin/env python3
-"""
-Insert remaining embeddings using direct database connection
-"""
+"""Add embeddings for existing laws"""
 
-import os
-import psycopg2
+import time
+from openai import OpenAI
 
-def insert_embeddings():
-    """Insert embeddings via PostgreSQL connection"""
+env = {}
+with open('.env') as f:
+    for line in f:
+        if '=' in line and not line.startswith('#'):
+            key, val = line.strip().split('=', 1)
+            env[key] = val
 
-    # Read database URL from .env file
-    with open('.env') as f:
-        for line in f:
-            if line.startswith('SUPABASE_DB_URL='):
-                db_url = line.split('=', 1)[1].strip()
-                break
-        else:
-            db_url = None
+openai_client = OpenAI(api_key=env['OPENAI_API_KEY'])
 
-    if not db_url:
-        print("❌ Missing SUPABASE_DB_URL")
-        return
+# Get existing laws without embeddings from database
+EXISTING_LAWS = [
+    {
+        "id": "check_db",
+        "name_ar": "النظام الأساسي للحكم",
+        "text": "النظام الأساسي للحكم: المملكة العربية السعودية، دولة عربية إسلامية، ذات سيادة تامة، دينها الإسلام، ودستورها كتاب الله تعالى وسنة رسوله."
+    },
+    {
+        "id": "check_db2",
+        "name_ar": "نظام مكافحة جرائم الإرهاب وتمويله",
+        "text": "نظام مكافحة جرائم الإرهاب وتمويله: يهدف هذا النظام إلى مكافحة الإرهاب وتمويله وحماية المجتمع والأفراد من الأعمال الإرهابية."
+    }
+]
 
-    print("=" * 80)
-    print("Inserting Remaining Embeddings")
-    print("=" * 80)
+print("🧠 Generating embeddings for existing laws...")
 
-    # Connect to database
-    conn = psycopg2.connect(db_url)
-    cursor = conn.cursor()
+for law in EXISTING_LAWS:
+    print(f"\n📜 {law['name_ar']}")
+    try:
+        response = openai_client.embeddings.create(
+            model="text-embedding-3-small",
+            input=f"{law['name_ar']}\n\n{law['text']}"
+        )
+        embedding = response.data[0].embedding
+        print(f"   ✅ Embedding generated ({len(embedding)} dimensions)")
+        
+        # Output SQL
+        print(f"\n   SQL to execute:")
+        print(f"   UPDATE law_embeddings SET embedding = '{embedding}'::vector")
+        print(f"   WHERE law_id = (SELECT id FROM laws WHERE name_ar = '{law['name_ar']}');")
+        
+        time.sleep(1)
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
 
-    # Read embedding files
-    embeddings_to_insert = [
-        ('04156ed9-d15d-414d-b1b4-62e7a88adc31', 'emb_04156ed9.txt', 'النظام الأساسي للحكم'),
-        ('961ad019-c689-495f-aa88-dfc9bae982e4', 'emb_961ad019.txt', 'نظام مكافحة جرائم الإرهاب'),
-    ]
-
-    for law_id, filename, text_chunk in embeddings_to_insert:
-        print(f"\n📖 Inserting: {text_chunk}")
-
-        try:
-            # Read embedding
-            with open(filename) as f:
-                embedding_str = f.read().strip()
-
-            # Insert using parameterized query
-            cursor.execute(
-                """
-                INSERT INTO law_embeddings (law_id, text_chunk, embedding, chunk_index)
-                VALUES (%s, %s, %s::vector, 0)
-                RETURNING id
-                """,
-                (law_id, text_chunk, embedding_str)
-            )
-
-            result = cursor.fetchone()
-            conn.commit()
-
-            print(f"  ✅ Inserted! ID: {result[0]}")
-
-        except Exception as e:
-            print(f"  ❌ Error: {e}")
-            conn.rollback()
-
-    # Check total count
-    cursor.execute("SELECT COUNT(*) FROM law_embeddings")
-    count = cursor.fetchone()[0]
-
-    cursor.close()
-    conn.close()
-
-    print("\n" + "=" * 80)
-    print(f"✅ Complete! Total embeddings: {count}")
-    print("=" * 80)
-
-if __name__ == "__main__":
-    insert_embeddings()
+print("\n✅ Done! Copy SQL statements above to Supabase SQL Editor")
