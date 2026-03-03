@@ -90,11 +90,11 @@ Deno.serve(async (req: Request) => {
     const embeddingData = await embeddingResponse.json();
     const questionEmbedding = embeddingData.data[0].embedding;
 
-    // Step 2: Find similar laws using vector similarity search
-    console.log("Searching for similar laws using vector search...");
+    // Step 2: Find similar articles using vector similarity search (article-level)
+    console.log("Searching for similar articles using vector search...");
 
-    const { data: similarLaws, error: searchError } = await supabase.rpc(
-      "search_similar_laws",
+    const { data: similarArticles, error: searchError } = await supabase.rpc(
+      "search_similar_articles",
       {
         query_embedding: questionEmbedding,
         match_threshold: 0.3,
@@ -107,21 +107,21 @@ Deno.serve(async (req: Request) => {
       throw searchError;
     }
 
-    console.log(`Found ${similarLaws?.length || 0} similar laws`);
+    console.log(`Found ${similarArticles?.length || 0} similar articles`);
 
     // Format results for the AI
-    const results = similarLaws?.map((law: any) => ({
-      article_id: law.law_id,
-      law_id: law.law_id,
-      law_name_ar: law.law_name_ar,
+    const results = similarArticles?.map((article: any) => ({
+      article_id: article.article_id,
+      law_id: article.law_id,
+      law_name_ar: article.law_name_ar,
       law_name_en: "",
-      law_number: law.law_number,
-      law_url: law.law_url,
-      publication_date: "",
-      article_number: "1",
-      article_title_ar: "",
-      article_text_ar: law.full_text_ar,
-      similarity: law.similarity,
+      law_number: article.law_number,
+      law_url: article.law_url,
+      publication_date: article.publication_date || "",
+      article_number: article.article_number,
+      article_title_ar: article.article_title_ar || "",
+      article_text_ar: article.article_text_ar,
+      similarity: article.similarity,
     })) || [];
 
     console.log(`Returning ${results.length} results with similarities:`,
